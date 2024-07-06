@@ -13,7 +13,6 @@ The Mental Health Predictor project is an innovative solution designed to assess
 ## Screenshots
 
 ![App Screenshot](./misc/a.png)
-![App Screenshot](./misc/b.png)
 
 
 

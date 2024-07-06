@@ -1,6 +1,4 @@
-gradio
-matplotlib
+streamlit
 numpy
-seaborn
 pandas
 scikit-learn

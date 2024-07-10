@@ -1,76 +1,125 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import pickle
-from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OrdinalEncoder, StandardScaler, LabelEncoder
 
-# Load or train your best model (RandomForestClassifier in this case)
-best_model_path = 'models/RandomForest_best_model.pkl'
-with open(best_model_path, 'rb') as f:
-    best_model = pickle.load(f)
+# Load the encoders and the model
+with open('ord_encoder.pkl', 'rb') as f:
+    ord_encoder = pickle.load(f)
 
-# Load the preprocessor
-preprocessor_path = 'models/preprocessor.pkl'
-with open(preprocessor_path, 'rb') as f:
-    preprocessor = pickle.load(f)
+with open('std_scaler.pkl', 'rb') as f:
+    std_scaler = pickle.load(f)
 
-# Streamlit app UI
-st.title('Mental Health Predictor')
-st.image('misc/mental1.jpg', use_column_width=True)
+with open('lb_encoder.pkl', 'rb') as f:
+    lb_encoder = pickle.load(f)
 
-st.sidebar.header('A quick survey to predict mental health')
+with open('XGBoost_final.pkl', 'rb') as f:
+    model = pickle.load(f)
 
-# Collect user inputs
-def collect_inputs():
-    inputs = {}
-    inputs['Age'] = st.sidebar.slider('What is you age?', 18, 100, 30)
-    inputs['Gender'] = st.sidebar.radio('Gender', ['male', 'female', 'others'])
-    inputs['family_history'] = st.sidebar.radio('Do you have any medical history of Mental health?', ['Yes', 'No'])
-    inputs['no_employees'] = st.sidebar.radio('Number of Employees in your Company', ['1-5', '6-25', '26-100', '100-500', '500-1000', 'More than 1000'])
-    inputs['remote_work'] = st.sidebar.radio('Do you work Remotely?', ['Yes', 'No'])
-    inputs['tech_company'] = st.sidebar.radio('Do you work in a Tech company?', ['Yes', 'No'])
-    inputs['benefits'] = st.sidebar.radio('Does your employer provide mental health benefits?', ['Yes', 'No', 'Don\'t know'])
-    inputs['care_options'] = st.sidebar.radio('Are you aware of the mental health care options available to you?', ['Yes', 'No', 'Not sure'])
-    inputs['wellness_program'] = st.sidebar.radio('Does your employer offer a wellness program?', ['Yes', 'No', 'Don\'t know'])
-    inputs['seek_help'] = st.sidebar.radio('Do you know where to seek help for mental health issues?', ['Yes', 'No', 'Don\'t know'])
-    inputs['anonymity'] = st.sidebar.radio('Do you feel your privacy is protected if you seek mental health treatment?', ['Yes', 'No', 'Don\'t know'])
-    inputs['leave'] = st.sidebar.radio('How easy is it for you to take medical leave for mental health reasons?', ['Somewhat easy', 'Somewhat difficult', 'Very easy', 'Very difficult', 'Don\'t know'])
-    inputs['mental_health_consequence'] = st.sidebar.radio('Could discussing mental health issues at work have negative consequences?', ['Yes', 'No', 'Maybe'])
-    inputs['phys_health_consequence'] = st.sidebar.radio('Could discussing physical health issues at work have negative consequences?', ['Yes', 'No', 'Maybe'])
-    inputs['coworkers'] = st.sidebar.radio('Are you comfortable discussing mental health issues with your coworkers?', ['Yes', 'No', 'Some of them'])
-    inputs['supervisor'] = st.sidebar.radio('Are you comfortable discussing mental health issues with your supervisor?', ['Yes', 'No', 'Some of them'])
-    inputs['mental_health_interview'] = st.sidebar.radio('Has mental health ever been discussed during your job interviews?', ['Yes', 'No', 'Maybe'])
-    inputs['phys_health_interview'] = st.sidebar.radio('Has physical health ever been discussed during your job interviews?', ['Yes', 'No', 'Maybe'])
-    inputs['mental_vs_physical'] = st.sidebar.radio('Does your employer address mental health as much as physical health?', ['Yes', 'No', 'Don\'t know'])
-    inputs['obs_consequence'] = st.sidebar.radio('Do you think mental health issues affect your job performance?', ['Yes', 'No'])
-    return pd.DataFrame([inputs])
+# Define the columns and options for the inputs
+gender_options = ['Female', 'Male', 'Other']
+self_employed_options = ['No', 'Yes']
+family_history_options = ['No', 'Yes']
+work_interfere_options = ['Never', 'Rarely', 'Sometimes', 'Often']
+no_employees_options = ['1-5', '6-25', '26-100', '100-500', '500-1000', 'More than 1000']
+remote_work_options = ['No', 'Yes']
+tech_company_options = ['No', 'Yes']
+benefits_options = ['No', "Don't know", 'Yes']
+care_options = ['No', 'Not sure', 'Yes']
+wellness_program_options = ['No', "Don't know", 'Yes']
+seek_help_options = ['No', "Don't know", 'Yes']
+anonymity_options = ['No', "Don't know", 'Yes']
+leave_options = ['Very easy', 'Somewhat easy', "Don't know", 'Somewhat difficult', 'Very difficult']
+mental_health_consequence_options = ['No', 'Maybe', 'Yes']
+phys_health_consequence_options = ['No', 'Maybe', 'Yes']
+coworkers_options = ['No', 'Some of them', 'Yes']
+supervisor_options = ['No', 'Some of them', 'Yes']
+mental_health_interview_options = ['No', 'Maybe', 'Yes']
+phys_health_interview_options = ['No', 'Maybe', 'Yes']
+mental_vs_physical_options = ["Don't know", 'No', 'Yes']
+obs_consequence_options = ['No', 'Yes']
 
-user_input = collect_inputs()
+# Streamlit UI
+st.title("Mental Health Prediction App")
 
-# Ensure columns are in the same order as during training
-expected_columns = ['Age', 'Gender', 'family_history', 'no_employees', 'remote_work', 'tech_company', 'benefits',
-                    'care_options', 'wellness_program', 'seek_help', 'anonymity', 'leave', 'mental_health_consequence',
-                    'phys_health_consequence', 'coworkers', 'supervisor', 'mental_health_interview', 'phys_health_interview',
-                    'mental_vs_physical', 'obs_consequence']
-user_input = user_input[expected_columns]
-print(f'user_input.shape = {user_input.shape}')
+st.sidebar.title("A Survey to Predict Mental Health in Tech")
 
-# Preprocess user input
-user_input_preprocessed = preprocessor.transform(user_input)
-print(f'user_input_preprocessed.shape = {user_input_preprocessed.shape}')
+age = st.sidebar.slider("Age", 15, 75, 25)
+gender = st.sidebar.radio("Gender", gender_options)
+self_employed = st.sidebar.radio("Self-employed", self_employed_options)
+family_history = st.sidebar.radio("Family History of Mental Illness", family_history_options)
+work_interfere = st.sidebar.radio("Work Interference", work_interfere_options)
+no_employees = st.sidebar.radio("Number of Employees", no_employees_options)
+remote_work = st.sidebar.radio("Remote Work", remote_work_options)
+tech_company = st.sidebar.radio("Tech Company", tech_company_options)
+benefits = st.sidebar.radio("Benefits", benefits_options)
+care_options = st.sidebar.radio("Care Options", care_options)
+wellness_program = st.sidebar.radio("Wellness Program", wellness_program_options)
+seek_help = st.sidebar.radio("Seek Help", seek_help_options)
+anonymity = st.sidebar.radio("Anonymity", anonymity_options)
+leave = st.sidebar.radio("Leave", leave_options)
+mental_health_consequence = st.sidebar.radio("Mental Health Consequence", mental_health_consequence_options)
+phys_health_consequence = st.sidebar.radio("Physical Health Consequence", phys_health_consequence_options)
+coworkers = st.sidebar.radio("Coworkers", coworkers_options)
+supervisor = st.sidebar.radio("Supervisor", supervisor_options)
+mental_health_interview = st.sidebar.radio("Mental Health Interview", mental_health_interview_options)
+phys_health_interview = st.sidebar.radio("Physical Health Interview", phys_health_interview_options)
+mental_vs_physical = st.sidebar.radio("Mental vs Physical Health", mental_vs_physical_options)
+obs_consequence = st.sidebar.radio("Observed Consequence", obs_consequence_options)
 
-if st.sidebar.button('Predict'):
-    prediction = best_model.predict(user_input_preprocessed)
-    prediction_proba = best_model.predict_proba(user_input_preprocessed)
-    print(f'prediction = {prediction}')
-    
-    st.subheader('Prediction')
+# Collect the user inputs into a DataFrame
+data = {
+    'age': [age],
+    'gender': [gender],
+    'self_employed': [self_employed],
+    'family_history': [family_history],
+    'work_interfere': [work_interfere],
+    'no_employees': [no_employees],
+    'remote_work': [remote_work],
+    'tech_company': [tech_company],
+    'benefits': [benefits],
+    'care_options': [care_options],
+    'wellness_program': [wellness_program],
+    'seek_help': [seek_help],
+    'anonymity': [anonymity],
+    'leave': [leave],
+    'mental_health_consequence': [mental_health_consequence],
+    'phys_health_consequence': [phys_health_consequence],
+    'coworkers': [coworkers],
+    'supervisor': [supervisor],
+    'mental_health_interview': [mental_health_interview],
+    'phys_health_interview': [phys_health_interview],
+    'mental_vs_physical': [mental_vs_physical],
+    'obs_consequence': [obs_consequence],
+}
+
+df_input = pd.DataFrame(data)
+
+# Separate age from the other features for encoding and scaling
+age_column = df_input[['age']]
+categorical_columns = df_input.drop(columns=['age'])
+
+# Apply the encoders
+categorical_columns_encoded = ord_encoder.transform(categorical_columns)
+df_input_encoded = pd.DataFrame(categorical_columns_encoded, columns=categorical_columns.columns)
+
+# Combine the age column with the encoded and scaled features
+df_input_combined = pd.concat([age_column, df_input_encoded], axis=1)
+df_input_combined_scaled = std_scaler.transform(df_input_combined)
+
+st.image('misc/mental1.jpg',use_column_width=True)
+
+# Make prediction
+if st.button("Predict",use_container_width=True):
+    prediction = model.predict(df_input_combined_scaled)
+    prediction_proba = model.predict_proba(df_input_combined_scaled)
+
     if prediction[0] == 1:
-        st.write("Hello! From your responses, it appears that consulting a doctor might be beneficial. Don't worry; we are here for you every step of the way. With the right support, you'll be back on track soon! Take care!")
+        st.write("Prediction: **Requires Treatment**")
     else:
-        st.write("Hi! Based on your responses, it seems like you are doing well. Keep it up!")
-        st.balloons()
-    st.subheader('Prediction Probability')
-    st.write(f"Probability of needing treatment: {prediction_proba[0][1]:.2f}")
-    st.write(f"Probability of not needing treatment: {prediction_proba[0][0]:.2f}")
+        st.write("Prediction: **Does not require Treatment**")
 
-    
+    st.write("Prediction Probability:")
+    st.write(f"Does not require Treatment: {prediction_proba[0][0]:.2f}")
+    st.write(f"Requires Treatment: {prediction_proba[0][1]:.2f}")

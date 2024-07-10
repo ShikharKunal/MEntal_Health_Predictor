@@ -1,189 +1,230 @@
-import pandas as pd
 import numpy as np
-from sklearn.impute import SimpleImputer
-from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.preprocessing import StandardScaler, OneHotEncoder, PolynomialFeatures
-from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier, GradientBoostingClassifier
-from sklearn.neural_network import MLPClassifier
-from sklearn.svm import SVC
-from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-from sklearn.ensemble import VotingClassifier, StackingClassifier
+import pandas as pd
+import warnings
 import pickle
+warnings.simplefilter('ignore')
 
-path = 'dataset/survey.csv'
-data_file = pd.read_csv(path)
+df = pd.read_csv('dataset/survey.csv')
 
-dropped_columns = ['comments', 'Timestamp', 'state', 'self_employed', 'work_interfere', 'Country']
-data_file.drop(dropped_columns, axis=1, inplace=True)
-data_file.dropna(inplace=True)
+df.columns = df.columns.str.lower()
 
-# Process gender column
-def process_gender(gender):
-    gender = gender.lower()
-    if 'female' not in gender and ('male' in gender or gender == 'm'):
-        return 'male'
-    elif 'female' in gender or gender == 'f':
-        return 'female'
-    else:
-        return 'others'
+df = df.drop(['country','state','timestamp','comments'], axis = 1)
 
-data_file['Gender'] = data_file['Gender'].apply(process_gender)
+df['gender'].replace(['Male ', 'male', 'M', 'm', 'Male', 'Cis Male',
+                     'Man', 'cis male', 'Mail', 'Male-ish', 'Male (CIS)',
+                      'Cis Man', 'msle', 'Malr', 'Mal', 'maile', 'Make',], 'Male', inplace = True)
 
-# Filter age column
-data_file = data_file[(data_file['Age'] > 16) & (data_file['Age'] < 100)]
+df['gender'].replace(['Female ', 'female', 'F', 'f', 'Woman', 'Female',
+                     'femail', 'Cis Female', 'cis-female/femme', 'Femake', 'Female (cis)',
+                     'woman',], 'Female', inplace = True)
 
-# Define features and target
-y = data_file['treatment'].replace(['Yes', 'No'], [1, 0])
-X = data_file.drop(columns=['treatment'])
+df["gender"].replace(['Female (trans)', 'queer/she/they', 'non-binary',
+                     'fluid', 'queer', 'Androgyne', 'Trans-female', 'male leaning androgynous',
+                      'Agender', 'A little about you', 'Nah', 'All',
+                      'ostensibly male, unsure what that really means',
+                      'Genderqueer', 'Enby', 'p', 'Neuter', 'something kinda male?',
+                      'Guy (-ish) ^_^', 'Trans woman',], 'Other', inplace = True)
 
-# Define numeric and categorical features
-numeric_features = ['Age']
-categorical_features = ['Gender', 'family_history', 'no_employees',
-                        'remote_work', 'tech_company', 'benefits', 'care_options',
-                        'wellness_program', 'seek_help', 'anonymity', 'leave',
-                        'mental_health_consequence', 'phys_health_consequence', 'coworkers',
-                        'supervisor', 'mental_health_interview', 'phys_health_interview',
-                        'mental_vs_physical', 'obs_consequence']
 
-# Feature engineering
-preprocessor = ColumnTransformer(
-    transformers=[
-        ('num', Pipeline(steps=[
-            ('scaler', StandardScaler()),
-            ('poly', PolynomialFeatures(degree=2, include_bias=False))
-        ]), numeric_features),
-        ('cat', OneHotEncoder(drop='first'), categorical_features)  # drop='first' to handle multicollinearity
-    ])
+df.loc[df.age<12,'age']=15
+df.loc[df.age>75,'age']=75
 
-# Fit the preprocessor
-preprocessor.fit(X)
 
-# Transform the features
-X_preprocessed = preprocessor.transform(X)
+from sklearn.model_selection import train_test_split
+train_data, test_data = train_test_split(df,test_size=0.15,stratify=df['treatment'],random_state=42 )
 
-# Save the preprocessor
-with open('preprocessor.pkl', 'wb') as f:
-    pickle.dump(preprocessor, f)
+health = train_data.copy()
 
-# Split data into train and test sets
-X_train, X_test, y_train, y_test = train_test_split(X_preprocessed, y, test_size=0.2, random_state=42)
+#Self employed column contains as low as 2% null values , so it is okay to replace it with mode.
+se_mode = train_data['self_employed'].mode().values[0] 
+train_data['self_employed'].fillna(se_mode,inplace=True)
+# Work_interfere contains almost 20% null values which is significant as we have less data.Let us once see the null values to find any pattern
+train_data[train_data['work_interfere'].isna()]['treatment'].value_counts()
 
-# Define models and parameter grids
-models = {
-    'RandomForest': RandomForestClassifier(),
-    'AdaBoost': AdaBoostClassifier(),
-    'GradientBoosting': GradientBoostingClassifier(),
-    'MLPClassifier': MLPClassifier(),
-    'SVC': SVC()
-}
 
-param_grids = {
-    'RandomForest': {
-        'classifier__n_estimators': [100, 200, 300],
-        'classifier__max_depth': [None, 10, 20, 30],
-        'classifier__min_samples_split': [2, 5, 10]
-    },
-    'AdaBoost': {
-        'classifier__n_estimators': [50, 100, 200],
-        'classifier__learning_rate': [0.01, 0.1, 1]
-    },
-    'GradientBoosting': {
-        'classifier__n_estimators': [100, 200, 300],
-        'classifier__learning_rate': [0.01, 0.1, 0.2],
-        'classifier__max_depth': [3, 4, 5]
-    },
-    'MLPClassifier': {
-        'classifier__hidden_layer_sizes': [(50,50,50), (50,100,50), (100,)],
-        'classifier__activation': ['tanh', 'relu'],
-        'classifier__solver': ['sgd', 'adam'],
-        'classifier__alpha': [0.0001, 0.05],
-        'classifier__learning_rate': ['constant','adaptive']
-    },
-    'SVC': {
-        'classifier__C': [0.1, 1, 10, 100],
-        'classifier__gamma': [1, 0.1, 0.01, 0.001],
-        'classifier__kernel': ['rbf', 'poly', 'sigmoid']
+train_data['work_interfere'].fillna('Never',inplace = True)
+
+X_train = train_data.drop('treatment',axis=1)
+y_train = train_data['treatment'].copy()
+
+gender_cols = ['Female','Male','Other']
+self_employed_cols = ['No','Yes']
+family_history_cols = ['No','Yes']
+work_interfere_cols = ['Never','Rarely','Sometimes','Often']
+no_employees_cols = ['1-5','6-25','26-100','100-500','500-1000','More than 1000']
+remote_work_cols = ['No','Yes']
+tech_company_cols = ['No','Yes']
+benefits_cols = ['No','Don\'t know','Yes'] 
+care_options_cols = ['No','Not sure','Yes']
+wellness_program_cols  =['No','Don\'t know','Yes']
+seek_help_cols = ['No','Don\'t know','Yes']
+anonymity_cols = ['No','Don\'t know','Yes']
+leave_cols = [ 'Very easy', 'Somewhat easy',"Don't know" ,'Somewhat difficult','Very difficult']
+mental_health_consequence_cols = ['No','Maybe','Yes']
+phys_health_consequence_cols = ['No','Maybe','Yes']
+coworkers_col = ['No','Some of them','Yes']
+supervisor_cols = ['No','Some of them','Yes']
+mental_health_interview_cols = ['No','Maybe','Yes']
+phys_health_interview_cols = ['No','Maybe','Yes']
+mental_vs_physical_cols = ["Don't know",'No','Yes']
+obs_consequence_cols = ['No','Yes']
+
+columns_for_encoder = [gender_cols,self_employed_cols,family_history_cols,work_interfere_cols,no_employees_cols,remote_work_cols,
+                            tech_company_cols,benefits_cols,care_options_cols,wellness_program_cols,seek_help_cols,anonymity_cols,leave_cols,
+                            mental_health_consequence_cols,phys_health_consequence_cols,coworkers_col,supervisor_cols,mental_health_interview_cols,
+                            phys_health_interview_cols,mental_vs_physical_cols,obs_consequence_cols]
+
+features = list(X_train.columns)
+
+from sklearn.preprocessing import OrdinalEncoder
+ord_encoder = OrdinalEncoder(categories=list(columns_for_encoder))
+X_train[features[1:]] = ord_encoder.fit_transform(X_train.iloc[:,1:])
+#save the encoder
+with open('ord_encoder.pkl', 'wb') as f:
+    pickle.dump(ord_encoder, f)
+
+from sklearn.preprocessing import StandardScaler
+std_scaler = StandardScaler()
+X_train[features] = std_scaler.fit_transform(X_train)
+
+#save the scaler
+with open('std_scaler.pkl', 'wb') as f:
+    pickle.dump(std_scaler, f)
+
+
+from sklearn.preprocessing import LabelEncoder
+lb_encoder = LabelEncoder()
+y_train = lb_encoder.fit_transform(y_train)
+
+#save the label encoder
+with open('lb_encoder.pkl', 'wb') as f:
+    pickle.dump(lb_encoder, f)
+
+
+from sklearn.metrics import f1_score
+from sklearn.model_selection import cross_val_score
+def train_evaluate(model,X_train,y_train,name):
+    model.fit(X_train,y_train)
+    y_pred = model.predict(X_train)
+    f1_train = f1_score(y_train,y_pred)
+
+    #Cross validation
+    f1_val = cross_val_score(model,X_train,y_train,scoring='f1',cv=10)
+    
+    # returning the scores
+    score = pd.DataFrame({'Name' : name ,'F1_score_trainset' : [f1_train], 'F1_score_validationset' : [f1_val.mean()]})
+    return score
+
+from sklearn.linear_model import LogisticRegression
+log_reg = LogisticRegression(penalty='l1',solver='liblinear')
+train_evaluate(log_reg,X_train,y_train,'Logistic Regression')
+
+from sklearn.tree import DecisionTreeClassifier
+dt_clf = DecisionTreeClassifier(max_leaf_nodes=4,random_state=42)
+train_evaluate(dt_clf,X_train,y_train,'DecisionTreeClassifier')
+
+from sklearn.svm import SVC
+svc_clf = SVC()
+train_evaluate(svc_clf,X_train,y_train,'Support Vector Classifier')
+
+from sklearn.ensemble import RandomForestClassifier
+rnd_clf = RandomForestClassifier(random_state=42)
+train_evaluate(rnd_clf,X_train,y_train,'RandomForestClassifier')
+
+
+from sklearn.ensemble import GradientBoostingClassifier
+gdb_clf = GradientBoostingClassifier(random_state=42,subsample=0.8)
+
+train_evaluate(gdb_clf,X_train,y_train,"GradientBoosting CLASSIFIER")
+
+from xgboost import XGBClassifier
+xgb_clf = XGBClassifier(verbosity=0)
+train_evaluate(xgb_clf,X_train,y_train,"XG Boost CLASSIFIER")
+
+from sklearn.model_selection import GridSearchCV
+param_distribs = {
+        'kernel': ['linear', 'rbf','polynomial'],
+        'C': [0.01,0.01,0.1,0.15,0.2,0.25,0.5,0.75,1,2,10,100],
+        'gamma': [1, 0.1, 0.01, 0.001, 0.0001],
     }
-}
+svm_clf = SVC()
+grid_cv = GridSearchCV(svm_clf , param_grid = param_distribs,
+                              cv=5,scoring='f1',
+                              verbose=1)
+grid_cv.fit(X_train,y_train)
 
-best_models = {}
+train_evaluate(grid_cv.best_estimator_,X_train,y_train,"SVC Tuned")
 
-for model_name, model in models.items():
-    pipeline = Pipeline(steps=[
-        ('classifier', model)
-    ])
-    
-    grid_search = GridSearchCV(pipeline, param_grids[model_name], cv=5, verbose=3, n_jobs=-1)
-    grid_search.fit(X_train, y_train)
-    
-    best_models[model_name] = grid_search.best_estimator_
-    
-    # Save the model with the highest accuracy
-    if model_name == max(best_models, key=lambda k: grid_search.best_score_):
-        with open(f'{model_name}_best_model.pkl', 'wb') as f:
-            pickle.dump(best_models[model_name], f)
+from sklearn.model_selection import GridSearchCV
 
-    print(f"Best parameters for {model_name}: {grid_search.best_params_}")
-    print(f"Best cross-validation accuracy for {model_name}: {grid_search.best_score_}\n")
+param_grid = [
+    {'n_estimators':[3,10,30,50,100],'max_features':[2,4,6,8],'max_depth' : [1,2,3,4]}
+]
 
-# Optionally, load the best model later
-# with open(f'{model_name}_best_model.pkl', 'rb') as f:
-#     loaded_model = pickle.load(f)
 
-for model_name, model in best_models.items():
-    y_pred = model.predict(X_test)
-    print(f'{model_name} results:')
-    print(classification_report(y_test, y_pred))
-    print(f'Accuracy: {accuracy_score(y_test, y_pred)}')
-    print('Confusion Matrix:')
-    print(confusion_matrix(y_test, y_pred))
-    print('\n')
 
-pipeline_rf = Pipeline(steps=[
-    ('classifier', best_models['RandomForest'])
-])
+forest_clf = RandomForestClassifier(random_state=42)
+grid_search = GridSearchCV(forest_clf, param_grid, cv=5,
+                           scoring='f1',
+                           return_train_score=True)
+grid_search.fit(X_train, y_train)
 
-pipeline_ab = Pipeline(steps=[
-    ('classifier', best_models['AdaBoost'])
-])
+train_evaluate(grid_search.best_estimator_,X_train,y_train,"RandomForest Tuned")
 
-pipeline_gb = Pipeline(steps=[
-    ('classifier', best_models['GradientBoosting'])
-])
+param_grid = [
+    {'n_estimators':[3,10,30,50,100],
+    'max_features':[2,4,6,8,10],
+    'max_depth' : [1,2,3,4],
+    'subsample': [0.25,0.5,0.75]}
+]
 
-pipeline_mlp = Pipeline(steps=[
-    ('classifier', best_models['MLPClassifier'])
-])
+gdb_clf2 = GradientBoostingClassifier(random_state=42)
+grid_search2 = GridSearchCV(gdb_clf2, param_grid, cv=5,
+                           scoring='f1',
+                           return_train_score=True)
+grid_search2.fit(X_train, y_train)
 
-pipeline_svc = Pipeline(steps=[
-    ('classifier', best_models['SVC'])
-])
 
-# Create the StackingClassifier with pipelines
-stacking_clf = StackingClassifier(
-    estimators=[
-        ('rf', pipeline_rf),
-        ('ab', pipeline_ab),
-        ('gb', pipeline_gb),
-        ('mlp', pipeline_mlp),
-        ('svc', pipeline_svc)
-    ],
-    final_estimator=RandomForestClassifier(),
-    cv=5
-)
+train_evaluate(grid_search2.best_estimator_,X_train,y_train,"GradientBoosting Tuned")
 
-# Fit the StackingClassifier
-stacking_clf.fit(X_train, y_train)
+param_grid = [
+    {'n_estimators':[3,10,30,50,100],
+    'eta' : [0.01,0.025, 0.05, 0.1],
+    'max_features':[2,4,6,8],
+    'max_depth' : [1,2,3,4],
+    'subsample': [0.5,0.75],
+    'booster':['gblinear','gbtree']}
+]
 
-# Evaluate the StackingClassifier
-y_pred_stacking = stacking_clf.predict(X_test)
-print("Stacking Classifier:")
-print(f"Classification report:\n{classification_report(y_test, y_pred_stacking)}")
-print(f"Confusion matrix:\n{confusion_matrix(y_test, y_pred_stacking)}")
-print(f"Accuracy: {accuracy_score(y_test, y_pred_stacking)}\n")
+xgb_clf = XGBClassifier(verbosity = 0)
+grid_search3 = GridSearchCV(xgb_clf, param_grid, cv=5,
+                           scoring='f1',
+                           return_train_score=True)
+grid_search3.fit(X_train, y_train)
 
-# Save the StackingClassifier
-with open('stacking_classifier.pkl', 'wb') as f:
-    pickle.dump(stacking_clf, f)
+train_evaluate(grid_search3.best_estimator_,X_train,y_train,"XGBoost Finetuned")
+
+XGBoost_final = grid_search3.best_estimator_
+
+# Save the model
+with open('XGBoost_final.pkl', 'wb') as f:
+    pickle.dump(XGBoost_final, f)
+
+X_test = test_data.drop('treatment',axis=1)
+y_test = test_data['treatment'].copy()
+
+X_test['self_employed'].fillna(se_mode,inplace=True)
+X_test['work_interfere'].fillna('Never',inplace = True)
+
+from sklearn.preprocessing import OrdinalEncoder
+# We should only transform using the learned encoder from the training set
+X_test[features[1:]] = ord_encoder.transform(X_test.iloc[:,1:])
+
+X_test[features] = std_scaler.transform(X_test)
+
+# Encoding the target column
+y_test = lb_encoder.transform(y_test)
+
+# Evaluating the model on test set with our finalized model
+y_test_pred = XGBoost_final.predict(X_test)
+print(f'F1_score on Test Set : {f1_score(y_test,y_test_pred)}')

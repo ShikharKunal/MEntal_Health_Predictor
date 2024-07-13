@@ -11,9 +11,6 @@ with open('ord_encoder.pkl', 'rb') as f:
 with open('std_scaler.pkl', 'rb') as f:
     std_scaler = pickle.load(f)
 
-with open('lb_encoder.pkl', 'rb') as f:
-    lb_encoder = pickle.load(f)
-
 with open('XGBoost_final.pkl', 'rb') as f:
     model = pickle.load(f)
 
